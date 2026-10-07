@@ -1,4 +1,4 @@
-﻿class NotificationModel {
+class NotificationModel {
   final int id;
   final int? userId;
   final String title;
@@ -52,6 +52,22 @@
       createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ?? DateTime.now(),
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'userId': userId,
+      'title': title,
+      'body': body,
+      'type': type,
+      'referenceId': referenceId,
+      'isRead': isRead,
+      'isGlobal': isGlobal,
+      'apartmentId': apartmentId,
+      'apartmentNumber': apartmentNumber,
+      'createdAt': createdAt.toIso8601String(),
+    };
+  }
 }
 
 class NotificationPageResponse {
@@ -79,4 +95,15 @@ class NotificationPageResponse {
       unreadCount: json['unreadCount'] is int ? json['unreadCount'] : int.tryParse(json['unreadCount']?.toString() ?? '0') ?? 0,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'items': items.map((item) => item.toJson()).toList(),
+      'page': page,
+      'pageSize': pageSize,
+      'totalCount': totalCount,
+      'unreadCount': unreadCount,
+    };
+  }
 }
+

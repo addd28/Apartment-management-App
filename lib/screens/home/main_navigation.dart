@@ -1,5 +1,7 @@
-﻿import 'package:flutter/material.dart';
+import 'dart:async';
+import 'package:flutter/material.dart';
 import '../../core/app_constants.dart';
+import '../../services/notification_service.dart';
 import '../invoices/invoice_list_screen.dart';
 import '../maintenance/maintenance_list_screen.dart';
 import '../profile/profile_tab.dart';
@@ -16,11 +18,30 @@ class MainNavigation extends StatefulWidget {
 
 class _MainNavigationState extends State<MainNavigation> {
   late int _currentIndex;
+  Timer? _notificationSyncTimer;
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialTab;
+
+    // Đồng bộ thiết bị và tải các thông báo có thể bị lỡ khi offline
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final notifService = NotificationService();
+      notifService.syncDeviceToken();
+      notifService.syncOfflineNotifications();
+    });
+
+    // Định kỳ kiểm tra thông báo mới từ backend mỗi 30 giây
+    _notificationSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      NotificationService().syncOfflineNotifications();
+    });
+  }
+
+  @override
+  void dispose() {
+    _notificationSyncTimer?.cancel();
+    super.dispose();
   }
 
   void _switchTab(int index) {

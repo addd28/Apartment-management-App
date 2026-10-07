@@ -1,4 +1,4 @@
-﻿class InvoiceDetailModel {
+class InvoiceDetailModel {
   final int id;
   final String serviceName;
   final String? description;
@@ -35,6 +35,8 @@ class PaymentModel {
   final String? transactionRef;
   final DateTime paymentDate;
   final String? notes;
+  final String status;
+  final String? note;
 
   PaymentModel({
     required this.id,
@@ -44,19 +46,27 @@ class PaymentModel {
     this.transactionRef,
     required this.paymentDate,
     this.notes,
+    this.status = 'CONFIRMED',
+    this.note,
   });
 
   factory PaymentModel.fromJson(Map<String, dynamic> json) {
     return PaymentModel(
       id: json['id'] is int ? json['id'] : int.tryParse(json['id'].toString()) ?? 0,
       invoiceId: json['invoiceId'] is int ? json['invoiceId'] : int.tryParse(json['invoiceId'].toString()) ?? 0,
-      amount: (json['amount'] is num) ? (json['amount'] as num).toDouble() : 0.0,
-      paymentMethod: json['paymentMethod'] ?? 'Transfer',
-      transactionRef: json['transactionRef'] ?? json['referenceCode'],
-      paymentDate: DateTime.tryParse(json['paymentDate']?.toString() ?? '') ?? DateTime.now(),
-      notes: json['notes'],
+      amount: (json['amount'] is num) ? (json['amount'] as num).toDouble() : (json['declaredAmount'] is num ? (json['declaredAmount'] as num).toDouble() : 0.0),
+      paymentMethod: json['paymentMethod'] ?? 'TRANSFER',
+      transactionRef: json['transactionRef'] ?? json['referenceCode'] ?? json['bankTransactionCode'],
+      paymentDate: DateTime.tryParse(json['paymentDate']?.toString() ?? json['submittedAt']?.toString() ?? '') ?? DateTime.now(),
+      notes: json['notes'] ?? json['note'],
+      status: json['status']?.toString().toUpperCase() ?? 'CONFIRMED',
+      note: json['note'] ?? json['notes'],
     );
   }
+
+  bool get isPending => status == 'PENDING';
+  bool get isConfirmed => status == 'CONFIRMED';
+  bool get isRejected => status == 'REJECTED';
 }
 
 class InvoiceModel {
@@ -70,7 +80,7 @@ class InvoiceModel {
   final DateTime dueDate;
   final double totalAmount;
   final double paidAmount;
-  final String status; // Pending, Paid, Overdue, Cancelled
+  final String status; // Unpaid, Paid, Overdue, Cancelled
   final List<InvoiceDetailModel> details;
   final List<PaymentModel> payments;
 
@@ -114,7 +124,7 @@ class InvoiceModel {
       dueDate: DateTime.tryParse(json['dueDate']?.toString() ?? '') ?? DateTime.now(),
       totalAmount: (json['totalAmount'] is num) ? (json['totalAmount'] as num).toDouble() : 0.0,
       paidAmount: (json['paidAmount'] is num) ? (json['paidAmount'] as num).toDouble() : 0.0,
-      status: json['status']?.toString() ?? 'Pending',
+      status: json['status']?.toString() ?? 'Unpaid',
       details: detailList,
       payments: paymentList,
     );
@@ -122,6 +132,8 @@ class InvoiceModel {
 
   bool get isPaid => status.toLowerCase() == 'paid';
   bool get isOverdue => status.toLowerCase() == 'overdue';
-  bool get isPending => status.toLowerCase() == 'pending' || status.toLowerCase() == 'unpaid';
-  double get remainingAmount => (totalAmount - paidAmount) > 0 ? (totalAmount - paidAmount) : 0.0;
+  bool get isUnpaid => status.toLowerCase() == 'unpaid';
+  bool get isCancelled => status.toLowerCase() == 'cancelled';
+  bool get hasPendingPayment => payments.any((p) => p.isPending);
+  double get remainingAmount => isPaid ? 0.0 : totalAmount;
 }

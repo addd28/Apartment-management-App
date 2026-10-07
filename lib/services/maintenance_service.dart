@@ -95,15 +95,13 @@ class MaintenanceService {
     required String priority,
   }) async {
     try {
-      final formData = FormData.fromMap({
-        'Title': title.trim(),
-        'Description': description.trim(),
-        'Priority': priority.toUpperCase(),
-      });
-
       final response = await _dio.put(
         '/MaintenanceRequests/$id',
-        data: formData,
+        data: {
+          'title': title.trim(),
+          'description': description.trim(),
+          'priority': priority.toUpperCase(),
+        },
       );
       return response.statusCode == 200;
     } catch (e) {

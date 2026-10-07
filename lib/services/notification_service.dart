@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -26,9 +26,9 @@ class NotificationService {
   final Dio _dio = ApiClient().dio;
   final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
 
-  NotificationNavigationCallback? _onNotificationNavigation;
   bool _isInitialized = false;
   bool _hasFirebase = false;
+  NotificationNavigationCallback? _onNotificationNavigation;
 
   static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
     'high_importance_channel',
@@ -48,7 +48,7 @@ class NotificationService {
       const initSettings = InitializationSettings(android: androidInit, iOS: iosInit);
 
       await _localNotifications.initialize(
-        initSettings,
+        settings: initSettings,
         onDidReceiveNotificationResponse: (response) {
           if (response.payload != null && response.payload!.isNotEmpty) {
             try {
@@ -68,7 +68,7 @@ class NotificationService {
         await androidPlugin.createNotificationChannel(_channel);
       }
     } catch (e) {
-      debugPrint('Local notifications init note: ');
+      debugPrint('Local notifications init note: $e');
     }
 
     // 2. Initialize Firebase Core & Messaging safely
@@ -81,12 +81,11 @@ class NotificationService {
       final fcm = FirebaseMessaging.instance;
 
       // Request permission
-      final settings = await fcm.requestPermission(
+      await fcm.requestPermission(
         alert: true,
         badge: true,
         sound: true,
       );
-      debugPrint('FCM AuthorizationStatus: ');
 
       // Handle terminated click
       final initialMessage = await fcm.getInitialMessage();
@@ -107,7 +106,6 @@ class NotificationService {
       // Get initial token and register
       final token = await fcm.getToken();
       if (token != null && token.isNotEmpty) {
-        debugPrint('FCM Token received: ...');
         await StorageService.saveFcmToken(token);
         if (StorageService.hasToken()) {
           await registerDeviceWithBackend(token);
@@ -116,14 +114,13 @@ class NotificationService {
 
       // Listen for token refresh
       fcm.onTokenRefresh.listen((newToken) async {
-        debugPrint('FCM Token refreshed');
         await StorageService.saveFcmToken(newToken);
         if (StorageService.hasToken()) {
           await registerDeviceWithBackend(newToken);
         }
       });
     } catch (e) {
-      debugPrint('Firebase Messaging setup note:  (App will function normally, push notifications active once google-services.json configured)');
+      debugPrint('Firebase Messaging note: $e');
       _hasFirebase = false;
     }
 
@@ -167,10 +164,10 @@ class NotificationService {
     );
 
     await _localNotifications.show(
-      message.hashCode,
-      title,
-      body,
-      NotificationDetails(android: androidDetails, iOS: iosDetails),
+      id: message.hashCode,
+      title: title,
+      body: body,
+      notificationDetails: NotificationDetails(android: androidDetails, iOS: iosDetails),
       payload: payload,
     );
   }
@@ -194,8 +191,21 @@ class NotificationService {
 
   Future<bool> registerDeviceWithBackend(String token) async {
     try {
-      final platform = kIsWeb ? 'WEB' : (Platform.isIOS ? 'IOS' : 'ANDROID');
-      final deviceName = kIsWeb ? 'Web Browser' : (Platform.isAndroid ? 'Android Device' : 'iOS Device');
+      final String platform;
+      final String deviceName;
+      if (kIsWeb) {
+        platform = 'WEB';
+        deviceName = 'Web Browser';
+      } else if (Platform.isIOS) {
+        platform = 'IOS';
+        deviceName = 'iOS Device';
+      } else if (Platform.isWindows) {
+        platform = 'WINDOWS';
+        deviceName = 'Windows Client';
+      } else {
+        platform = 'ANDROID';
+        deviceName = 'Android Device';
+      }
 
       final response = await _dio.post(
         '/devices/register',
@@ -207,7 +217,7 @@ class NotificationService {
       );
       return response.statusCode == 200 || response.statusCode == 201;
     } catch (e) {
-      debugPrint('Failed to register device token: ');
+      debugPrint('Failed to register device token: $e');
       return false;
     }
   }
@@ -222,14 +232,14 @@ class NotificationService {
       );
       return response.statusCode == 200;
     } catch (e) {
-      debugPrint('Failed to deactivate device token: ');
+      debugPrint('Failed to deactivate device token: $e');
       return false;
     }
   }
 
   Future<bool> deactivateDevice(int id) async {
     try {
-      final response = await _dio.delete('/devices/');
+      final response = await _dio.delete('/devices/$id');
       return response.statusCode == 200 || response.statusCode == 204;
     } catch (e) {
       throw Exception(ApiClient.getErrorMessage(e));
@@ -240,30 +250,108 @@ class NotificationService {
     try {
       final res = await getMyNotifications(page: page, pageSize: pageSize);
       return res.items;
-    } catch (_) {
-      // Fallback
+    } catch (e) {
+      debugPrint('getNotifications error: $e');
       return [];
     }
   }
 
+  /// Tải thông báo có hỗ trợ Offline Caching & cảnh báo thông báo mới khi kết nối lại
   Future<NotificationPageResponse> getMyNotifications({int page = 1, int pageSize = 20}) async {
     try {
       final response = await _dio.get(
-        '/notifications/my',
+        '/Notifications/my',
         queryParameters: {
           'page': page,
           'pageSize': pageSize,
         },
       );
-      return NotificationPageResponse.fromJson(response.data);
+
+      final result = NotificationPageResponse.fromJson(response.data);
+
+      if (page == 1) {
+        // Lưu cache offline
+        await StorageService.saveCachedNotifications(result.toJson());
+
+        // Kiểm tra thông báo chưa đọc gửi đến khi máy khách offline
+        final lastAlertedId = StorageService.getLastAlertedNotificationId();
+        int maxId = lastAlertedId;
+
+        for (final item in result.items) {
+          if (item.id > lastAlertedId) {
+            if (item.id > maxId) maxId = item.id;
+            // Nếu thông báo chưa đọc, hiển thị popup banner hệ thống
+            if (!item.isRead) {
+              await showLocalAlert(item);
+            }
+          }
+        }
+
+        if (maxId > lastAlertedId) {
+          await StorageService.setLastAlertedNotificationId(maxId);
+        }
+      }
+
+      return result;
     } catch (e) {
+      // Nếu mất mạng hoặc backend không phản hồi (offline)
+      if (page == 1) {
+        final cached = StorageService.getCachedNotifications();
+        if (cached != null) {
+          debugPrint('[NotificationService] Đang dùng dữ liệu thông báo offline từ cache.');
+          return NotificationPageResponse.fromJson(cached);
+        }
+      }
       throw Exception(ApiClient.getErrorMessage(e));
     }
   }
 
+  /// Hiển thị thông báo cục bộ dạng System Notification
+  Future<void> showLocalAlert(NotificationModel item) async {
+    try {
+      final androidDetails = AndroidNotificationDetails(
+        _channel.id,
+        _channel.name,
+        channelDescription: _channel.description,
+        importance: Importance.high,
+        priority: Priority.high,
+        icon: '@mipmap/ic_launcher',
+      );
+
+      const iosDetails = DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+      );
+
+      final payload = jsonEncode({
+        'type': item.type,
+        'referenceId': item.referenceId,
+      });
+
+      await _localNotifications.show(
+        id: item.id,
+        title: item.title,
+        body: item.body,
+        notificationDetails: NotificationDetails(android: androidDetails, iOS: iosDetails),
+        payload: payload,
+      );
+    } catch (e) {
+      debugPrint('showLocalAlert note: $e');
+    }
+  }
+
+  /// Đồng bộ ngầm các thông báo bị lỡ khi offline
+  Future<void> syncOfflineNotifications() async {
+    if (!StorageService.hasToken()) return;
+    try {
+      await getMyNotifications(page: 1, pageSize: 20);
+    } catch (_) {}
+  }
+
   Future<bool> markAsRead(int id) async {
     try {
-      final response = await _dio.put('/notifications//read');
+      final response = await _dio.put('/Notifications/$id/read');
       return response.statusCode == 200;
     } catch (e) {
       throw Exception(ApiClient.getErrorMessage(e));
@@ -272,7 +360,7 @@ class NotificationService {
 
   Future<bool> markAllAsRead() async {
     try {
-      final response = await _dio.put('/notifications/read-all');
+      final response = await _dio.put('/Notifications/read-all');
       return response.statusCode == 200;
     } catch (e) {
       throw Exception(ApiClient.getErrorMessage(e));

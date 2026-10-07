@@ -1,4 +1,4 @@
-﻿import 'package:dio/dio.dart';
+import 'package:dio/dio.dart';
 import '../core/api_client.dart';
 import '../models/invoice_model.dart';
 
@@ -40,17 +40,33 @@ class InvoiceService {
     String? notes,
   }) async {
     try {
+      final refCode = transactionRef ?? notes ?? 'ONLINE_${DateTime.now().millisecondsSinceEpoch}';
       final response = await _dio.post(
         '/Payments',
         data: {
           'invoiceId': invoiceId,
           'amount': amount,
           'paymentMethod': paymentMethod,
-          'transactionRef': transactionRef,
-          'notes': notes,
+          'referenceCode': refCode,
         },
       );
       return PaymentModel.fromJson(response.data);
+    } catch (e) {
+      throw Exception(ApiClient.getErrorMessage(e));
+    }
+  }
+
+  Future<String> createVnpayPayment(int invoiceId) async {
+    try {
+      final response = await _dio.post(
+        '/Payments/vnpay/create',
+        data: {'invoiceId': invoiceId},
+      );
+      final data = response.data;
+      if (data is Map<String, dynamic>) {
+        return (data['paymentUrl'] ?? data['data']?['paymentUrl'] ?? '').toString();
+      }
+      return '';
     } catch (e) {
       throw Exception(ApiClient.getErrorMessage(e));
     }
@@ -69,3 +85,4 @@ class InvoiceService {
     }
   }
 }
+

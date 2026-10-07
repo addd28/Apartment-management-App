@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 
 class StatusBadge extends StatelessWidget {
   final String status;
@@ -15,6 +15,9 @@ class StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = status.toLowerCase().trim();
+    if (s == 'unpaid') {
+      return const SizedBox.shrink();
+    }
     Color bg;
     Color fg;
     String label;

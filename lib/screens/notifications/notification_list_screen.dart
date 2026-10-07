@@ -1,6 +1,7 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../core/app_constants.dart';
+import '../../core/storage_service.dart';
 import '../../models/notification_model.dart';
 import '../../services/notification_service.dart';
 import '../../widgets/empty_state.dart';
@@ -19,15 +20,16 @@ class NotificationListScreen extends StatefulWidget {
 
 class _NotificationListScreenState extends State<NotificationListScreen> {
   final _service = NotificationService();
-  final ScrollController _scrollController = ScrollController();
+  final _scrollController = ScrollController();
 
   List<NotificationModel> _notifications = [];
   bool _isLoading = true;
   bool _isLoadingMore = false;
+  bool _isOffline = false;
   int _currentPage = 1;
   int _totalCount = 0;
   int _unreadCount = 0;
-  static const int _pageSize = 20;
+  final int _pageSize = 20;
 
   @override
   void initState() {
@@ -61,15 +63,31 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
           _notifications = res.items;
           _totalCount = res.totalCount;
           _unreadCount = res.unreadCount;
+          _isOffline = false;
           _isLoading = false;
         });
       }
     } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Không thể tải thông báo: ')),
-        );
+      final cached = StorageService.getCachedNotifications();
+      if (cached != null) {
+        final cachedRes = NotificationPageResponse.fromJson(cached);
+        if (mounted) {
+          setState(() {
+            _currentPage = 1;
+            _notifications = cachedRes.items;
+            _totalCount = cachedRes.totalCount;
+            _unreadCount = cachedRes.unreadCount;
+            _isOffline = true;
+            _isLoading = false;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() => _isLoading = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Không thể tải thông báo: $e')),
+          );
+        }
       }
     }
   }
@@ -98,10 +116,84 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
       await _service.markAllAsRead();
       _loadNotifications();
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Thao tác thất bại: ')),
+        SnackBar(content: Text('Thao tác thất bại: $e')),
       );
     }
+  }
+
+  void _showAnnouncementDialog(NotificationModel item) {
+    final dateFormat = DateFormat('HH:mm - dd/MM/yyyy');
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppConstants.primaryLight,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.campaign_rounded, color: AppConstants.primaryColor, size: 22),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                item.title,
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE0F2FE),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Text(
+                    'Ban Quản Lý Chung Cư',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0369A1)),
+                  ),
+                ),
+                Text(
+                  dateFormat.format(item.createdAt),
+                  style: const TextStyle(fontSize: 11, color: AppConstants.textSecondary),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            const Divider(height: 1),
+            const SizedBox(height: 12),
+            Text(
+              item.body,
+              style: const TextStyle(fontSize: 14, color: AppConstants.textPrimary, height: 1.5),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppConstants.primaryColor,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Đã hiểu'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _handleItemTap(NotificationModel item) async {
@@ -128,7 +220,6 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
       });
     }
 
-    // Navigate to target screen
     final type = item.type.toUpperCase();
     final refId = item.referenceId;
 
@@ -146,6 +237,8 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
       }
     } else if (type.contains('MOVING')) {
       Navigator.push(context, MaterialPageRoute(builder: (_) => const MoveRequestListScreen()));
+    } else {
+      _showAnnouncementDialog(item);
     }
   }
 
@@ -188,14 +281,40 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
               ? const EmptyState(
                   icon: Icons.notifications_none_rounded,
                   title: 'Chưa có thông báo nào',
-                  subtitle: 'Tất cả các thông báo mới về hóa đơn, bảo trì, lịch chuyển đồ sẽ xuất hiện ở đây.',
+                  description: 'Tất cả các thông báo mới về bảng tin chung cư, hóa đơn, bảo trì, lịch chuyển đồ sẽ xuất hiện ở đây.',
                 )
-              : RefreshIndicator(
-                  onRefresh: _loadNotifications,
-                  child: ListView.separated(
-                    controller: _scrollController,
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              : Column(
+                  children: [
+                    if (_isOffline)
+                      Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFEF3C7),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFFDE68A)),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.cloud_off_rounded, size: 20, color: Color(0xFFB45309)),
+                            SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'Bạn đang offline: Đang hiển thị các thông báo đã lưu trước đó. Kéo xuống để tải lại khi có mạng.',
+                                style: TextStyle(fontSize: 12, color: Color(0xFF92400E), height: 1.3),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    Expanded(
+                      child: RefreshIndicator(
+                        onRefresh: _loadNotifications,
+                        child: ListView.separated(
+                          controller: _scrollController,
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     itemCount: _notifications.length + (_isLoadingMore ? 1 : 0),
                     separatorBuilder: (_, __) => const SizedBox(height: 8),
                     itemBuilder: (ctx, idx) {
@@ -291,6 +410,9 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
                     },
                   ),
                 ),
+              ),
+            ],
+          ),
     );
   }
 }

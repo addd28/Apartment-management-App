@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'app_constants.dart';
 import '../models/user_model.dart';
@@ -66,10 +66,38 @@ class StorageService {
     return AppConstants.defaultBaseUrl;
   }
 
+  static const String keyCachedNotifications = 'cached_notifications';
+  static const String keyLastAlertedNotificationId = 'last_alerted_notification_id';
+
+  static Future<bool> saveCachedNotifications(Map<String, dynamic> data) async {
+    await init();
+    return await _prefs!.setString(keyCachedNotifications, jsonEncode(data));
+  }
+
+  static Map<String, dynamic>? getCachedNotifications() {
+    final str = _prefs?.getString(keyCachedNotifications);
+    if (str == null || str.isEmpty) return null;
+    try {
+      return jsonDecode(str) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static int getLastAlertedNotificationId() {
+    return _prefs?.getInt(keyLastAlertedNotificationId) ?? 0;
+  }
+
+  static Future<bool> setLastAlertedNotificationId(int id) async {
+    await init();
+    return await _prefs!.setInt(keyLastAlertedNotificationId, id);
+  }
+
   static Future<void> clearAll() async {
     await init();
     await _prefs!.remove(AppConstants.keyToken);
     await _prefs!.remove(AppConstants.keyUserData);
+    await _prefs!.remove(keyCachedNotifications);
     // keep FCM token or clear it as needed
   }
 }

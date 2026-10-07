@@ -1,9 +1,10 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../core/app_constants.dart';
 import '../../models/invoice_model.dart';
 import '../../services/invoice_service.dart';
 import '../../widgets/empty_state.dart';
+import '../../widgets/receipt_dialog.dart';
 import '../../widgets/status_badge.dart';
 import 'invoice_detail_screen.dart';
 import 'payment_history_screen.dart';
@@ -24,10 +25,26 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
 
   final List<Map<String, String>> _filters = [
     {'label': 'Tất cả', 'value': 'All'},
-    {'label': 'Chưa thanh toán', 'value': 'Pending'},
+    {'label': 'Chưa thanh toán', 'value': 'Unpaid'},
     {'label': 'Đã thanh toán', 'value': 'Paid'},
     {'label': 'Quá hạn', 'value': 'Overdue'},
   ];
+
+  List<InvoiceModel> get _filteredInvoices {
+    if (_currentFilter == 'All') return _invoices;
+    return _invoices.where((inv) {
+      if (_currentFilter == 'Unpaid') {
+        return inv.isUnpaid || (!inv.isPaid && !inv.isCancelled);
+      }
+      if (_currentFilter == 'Paid') {
+        return inv.isPaid;
+      }
+      if (_currentFilter == 'Overdue') {
+        return inv.isOverdue;
+      }
+      return true;
+    }).toList();
+  }
 
   @override
   void initState() {
@@ -144,22 +161,20 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                           ],
                         ),
                       )
-                    : _invoices.isEmpty
-                        ? EmptyState(
+                    : _filteredInvoices.isEmpty
+                        ? const EmptyState(
                             icon: Icons.receipt_long_rounded,
                             title: 'Không có hóa đơn',
-                            description: _currentFilter == 'All'
-                                ? 'Căn hộ của bạn hiện không có hóa đơn nào cần xử lý.'
-                                : 'Không có hóa đơn nào thuộc trạng thái "$_currentFilter".',
+                            description: 'Không có hóa đơn nào trong danh mục này.',
                           )
                         : RefreshIndicator(
                             onRefresh: _fetchInvoices,
                             child: ListView.separated(
                               padding: const EdgeInsets.all(16),
-                              itemCount: _invoices.length,
+                              itemCount: _filteredInvoices.length,
                               separatorBuilder: (_, __) => const SizedBox(height: 12),
                               itemBuilder: (ctx, idx) {
-                                final inv = _invoices[idx];
+                                final inv = _filteredInvoices[idx];
                                 return InkWell(
                                   onTap: () async {
                                     await Navigator.push(
@@ -205,7 +220,8 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                                 ),
                                               ],
                                             ),
-                                            StatusBadge(status: inv.status, fontSize: 11),
+                                            if (inv.isPaid || inv.isOverdue || inv.isCancelled)
+                                              StatusBadge(status: inv.status, fontSize: 11),
                                           ],
                                         ),
                                         const SizedBox(height: 12),
@@ -226,26 +242,56 @@ class _InvoiceListScreenState extends State<InvoiceListScreen> {
                                             ),
                                           ],
                                         ),
-                                        if (!inv.isPaid && inv.remainingAmount > 0) ...[
-                                          const SizedBox(height: 8),
-                                          Row(
-                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                            children: [
-                                              Text(
-                                                'Còn lại: ${_formatVND(inv.remainingAmount)}',
-                                                style: const TextStyle(
-                                                  fontSize: 13,
-                                                  color: AppConstants.dangerColor,
-                                                  fontWeight: FontWeight.w600,
+                                        // Trạng thái và nút thao tác chuẩn hóa
+                                        const SizedBox(height: 12),
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                const Text('Trạng thái: ', style: TextStyle(fontSize: 12, color: AppConstants.textSecondary)),
+                                                StatusBadge(status: inv.status, fontSize: 11),
+                                              ],
+                                            ),
+                                            if (inv.isPaid)
+                                              SizedBox(
+                                                height: 32,
+                                                child: OutlinedButton(
+                                                  style: OutlinedButton.styleFrom(
+                                                    foregroundColor: const Color(0xFF059669),
+                                                    side: const BorderSide(color: Color(0xFF10B981)),
+                                                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                                  ),
+                                                  onPressed: () => ReceiptDialog.show(context, invoice: inv),
+                                                  child: const Text('Xem biên nhận', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                                ),
+                                              )
+                                            else if (!inv.isCancelled)
+                                              SizedBox(
+                                                height: 32,
+                                                child: ElevatedButton(
+                                                  style: ElevatedButton.styleFrom(
+                                                    backgroundColor: const Color(0xFF10B981),
+                                                    foregroundColor: Colors.white,
+                                                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                                                    elevation: 0,
+                                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                                  ),
+                                                  onPressed: () async {
+                                                    await Navigator.push(
+                                                      context,
+                                                      MaterialPageRoute(
+                                                        builder: (_) => InvoiceDetailScreen(invoiceId: inv.id),
+                                                      ),
+                                                    );
+                                                    _fetchInvoices();
+                                                  },
+                                                  child: const Text('Thanh toán', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                                                 ),
                                               ),
-                                              const Text(
-                                                'Chạm để thanh toán >',
-                                                style: TextStyle(fontSize: 12, color: AppConstants.primaryColor, fontWeight: FontWeight.bold),
-                                              ),
-                                            ],
-                                          ),
-                                        ],
+                                          ],
+                                        ),
                                       ],
                                     ),
                                   ),
